@@ -37,6 +37,11 @@ for company_no , company in enumerate(yahoo_finance_symbols):
 
 progress_bar.close()
 
+if not stock_data:
+    raise ValueError('''\n\n
+                     No stock data was successfully downloaded, most likely today is a holiday. \n\n
+                     Please try downloading again later once there is a working stock market day \n\n''')
+
 all_stock_data = pd.DataFrame()
 
 for symbol, data in stock_data.items():
