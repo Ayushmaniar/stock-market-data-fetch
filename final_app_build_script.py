@@ -17,10 +17,22 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QLabel, 
                              QFrame, QCompleter, QTextEdit, QProgressBar)
 from PyQt5.QtCore import Qt, QSortFilterProxyModel, pyqtSlot
-from PyQt5.QtGui import QColor, QPalette, QFont
+from PyQt5.QtGui import QColor, QPalette, QFont, QDesktopServices, QCursor
+from PyQt5.QtCore import QUrl
 from datetime import datetime
 
 warnings.filterwarnings('ignore')
+
+class ClickableLabel(QLabel):
+    def __init__(self, text, url, parent=None):
+        super().__init__(text, parent)
+        self.url = url
+        self.setStyleSheet("color: blue; text-decoration: underline;")
+        self.setCursor(QCursor(Qt.PointingHandCursor))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            QDesktopServices.openUrl(QUrl(self.url))
 
 class DataDownloadThread(QThread):
     progress_signal = pyqtSignal(int)
@@ -351,6 +363,13 @@ class StockWatchlistApp(QMainWindow):
     def add_row_to_table(self, row):
         row_position = self.table.rowCount()
         self.table.insertRow(row_position)
+        # Create clickable label for stock symbol
+        symbol = str(row['SYMBOL'])
+        url = f"https://www.google.com/search?q={symbol.replace('.NS', '')}+share+price"
+        clickable_label = ClickableLabel(symbol, url)
+        self.table.setCellWidget(row_position, 0, clickable_label)
+
+
         for i, value in enumerate(row):
             item = QTableWidgetItem(str(value))
             if i in [9, 10, 11]:  # 1D, 5D, 1M columns
@@ -359,7 +378,10 @@ class StockWatchlistApp(QMainWindow):
                     item.setForeground(QColor('green'))
                 elif value_float < 0:
                     item.setForeground(QColor('red'))
-            self.table.setItem(row_position, i, item)
+            if i == 0:
+                pass
+            else:
+                self.table.setItem(row_position, i, item)
         
         delete_button = QPushButton("Delete")
         delete_button.clicked.connect(lambda: self.delete_stock(row['SYMBOL']))
