@@ -30,6 +30,12 @@ class ClickableLabel(QLabel):
         self.setStyleSheet("color: blue; text-decoration: underline;")
         self.setCursor(QCursor(Qt.PointingHandCursor))
 
+        # Set a larger font size
+        font = self.font()
+        font.setPointSize(9)  # You can adjust this value as needed
+        # font.setBold(True)     # Optional: make the font bold
+        self.setFont(font)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             QDesktopServices.openUrl(QUrl(self.url))
