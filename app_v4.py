@@ -337,6 +337,7 @@ class StockWatchlistApp(QMainWindow):
         if symbol and symbol not in self.watchlist:
             if self.df is not None and symbol in self.df['SYMBOL'].values:
                 self.watchlist.append(symbol)
+                self.quick_refresh_data()
                 self.update_table()
                 self.stock_input.clear()
             else:
@@ -427,7 +428,12 @@ class StockWatchlistApp(QMainWindow):
 
     @pyqtSlot(pd.DataFrame)
     def update_data(self, new_data):
-        self.df = new_data
+        self.df = self.df.set_index('SYMBOL')
+        new_data = new_data.set_index('SYMBOL')
+        self.df.update(new_data.where(~new_data.isna()))
+        self.df.reset_index(inplace=True)
+
+        # self.df = new_data
         self.update_table()
         self.progress_bar.setVisible(False)
         self.status_text.setVisible(False)
