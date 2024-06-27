@@ -38,6 +38,8 @@ class DataDownloadThread(QThread):
             stocks_df = pd.read_csv("../../EQUITY_L.csv")
             stocks_df['YahooEquiv'] = stocks_df['SYMBOL'] + '.NS'
 
+            stocks_df = stocks_df
+
             # If symbols are provided (for quick refresh), use only those
             if self.symbols:
                 yahoo_finance_symbols = [symbol for symbol in self.symbols]
@@ -115,13 +117,34 @@ class DataDownloadThread(QThread):
 
             all_stock_data.reset_index(inplace=True, drop=True)
 
+            # Create a new column containing the Google search URL for each symbol
+            google_search_urls = 'https://www.google.com/search?q=' + all_stock_data['SYMBOL'].str.replace('.NS','').apply(quote_plus) + '+share+price'
+            google_search_urls = google_search_urls.sort_index()
+
             self.status_signal.emit("Data processing completed.")
 
             # If it's a full refresh, save the data to a new Excel file
             if not self.symbols:
                 output_file_name = f'../../yahoo_finance_data/{today}_stock_market_data.xlsx'
-                all_stock_data.to_excel(output_file_name, index=False)
+                with pd.ExcelWriter(output_file_name, engine='xlsxwriter') as writer:
+                    # Write the DataFrame to the Excel file
+                    all_stock_data.to_excel(writer, index=False, sheet_name='Sheet1')
+
+                    # Get the workbook and worksheet objects
+                    workbook = writer.book
+                    worksheet = writer.sheets['Sheet1']
+
+                    for i, url in enumerate(google_search_urls):
+                        cell = f'A{i+2}'  # Adjust the row index to match the data (indexing starts from 2 because of header)
+                        worksheet.write_url(cell, url, string=all_stock_data.loc[i, 'SYMBOL'])
+
+                        red_format = workbook.add_format({'bg_color': '#FFC7CE'})
+
+                            # Apply the format to the 'Close' column
+                        worksheet.conditional_format('F2:F' + str(len(all_stock_data) + 1), {'type': 'no_blanks', 'format': red_format})
+
                 self.status_signal.emit(f"Data saved to {output_file_name}")
+    
 
             self.finished_signal.emit(all_stock_data)
 
@@ -206,11 +229,11 @@ class StockWatchlistApp(QMainWindow):
         # Load all stock symbols for auto-suggestion
         try:
             all_symbols_list = self.df['SYMBOL'].tolist()
-            print(all_symbols_list)
+
         except:
             all_symbols_list = []
         self.all_symbols = all_symbols_list
-        print(all_symbols_list)
+
         completer = QCompleter(self.all_symbols)
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         completer.setFilterMode(Qt.MatchContains)
