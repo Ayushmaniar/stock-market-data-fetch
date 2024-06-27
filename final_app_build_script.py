@@ -174,8 +174,14 @@ class StockWatchlistApp(QMainWindow):
         self.sort_column = None
         self.sort_order = Qt.AscendingOrder
         
+        self.init_ui()
         self.df = self.load_data()
         self.init_ui()
+        
+
+    def ensure_data_folder_exists(self, data_folder):
+        if not os.path.exists(data_folder):
+            os.makedirs(data_folder)
         
     def init_ui(self):
         central_widget = QWidget()
@@ -195,17 +201,23 @@ class StockWatchlistApp(QMainWindow):
         self.stock_input = QLineEdit()
         self.stock_input.setFixedWidth(300)
         self.stock_input.setPlaceholderText("Enter stock symbol")
-        self.stock_input.returnPressed.connect(self.add_stock)
+        self.stock_input.returnPressed.connect(self.add_stock_wrapper)
         
         # Load all stock symbols for auto-suggestion
-        self.all_symbols = self.df['SYMBOL'].tolist() if self.df is not None else []
+        try:
+            all_symbols_list = self.df['SYMBOL'].tolist()
+            print(all_symbols_list)
+        except:
+            all_symbols_list = []
+        self.all_symbols = all_symbols_list
+        print(all_symbols_list)
         completer = QCompleter(self.all_symbols)
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         completer.setFilterMode(Qt.MatchContains)
         self.stock_input.setCompleter(completer)
         
         add_button = QPushButton("Add Stock")
-        add_button.clicked.connect(self.add_stock)
+        add_button.clicked.connect(self.add_stock_wrapper)
         input_layout.addWidget(self.stock_input)
         input_layout.addWidget(add_button)
         input_layout.addStretch()
@@ -285,14 +297,20 @@ class StockWatchlistApp(QMainWindow):
         
         central_widget.setLayout(layout)
         
-        self.update_table()
+        try:
+            self.update_table()
+        except:
+            pass
         
     def load_data(self):
         folder_path = "../../yahoo_finance_data"
+        self.ensure_data_folder_exists(folder_path)
         files = [f for f in os.listdir(folder_path) if f.endswith("_stock_market_data.xlsx")]
         if not files:
             QMessageBox.warning(self, "No Data Found", "No stock data found. Please press the REFRESH ALL button to download data.")
+            self.refresh_all_data()
             return None
+        files = [f for f in os.listdir(folder_path) if f.endswith("_stock_market_data.xlsx")]
         latest_file = max(files, key=lambda x: datetime.strptime(x[:10], "%Y-%m-%d"))
         return pd.read_excel(os.path.join(folder_path, latest_file))
         
@@ -332,6 +350,10 @@ class StockWatchlistApp(QMainWindow):
         """)
         self.table.setCellWidget(row_position, 12, delete_button)
         
+    def add_stock_wrapper(self):
+        self.add_stock()
+        self.stock_input.clear()
+
     def add_stock(self):
         symbol = self.stock_input.text().upper()
         if symbol and symbol not in self.watchlist:
@@ -339,7 +361,7 @@ class StockWatchlistApp(QMainWindow):
                 self.watchlist.append(symbol)
                 self.quick_refresh_data()
                 self.update_table()
-                self.stock_input.clear()
+            
             else:
                 QMessageBox.warning(self, "Stock Not Found", "Stock unavailable in the data. Please try a different stock or correct its spelling.")
         elif symbol in self.watchlist:
@@ -388,6 +410,7 @@ class StockWatchlistApp(QMainWindow):
         self.download_thread.finished_signal.connect(self.update_data)
         self.download_thread.error_signal.connect(self.show_error)
         
+
         self.progress_bar.setVisible(True)
         self.status_text.setVisible(True)
         self.refresh_all_button.setEnabled(False)
@@ -428,10 +451,13 @@ class StockWatchlistApp(QMainWindow):
 
     @pyqtSlot(pd.DataFrame)
     def update_data(self, new_data):
-        self.df = self.df.set_index('SYMBOL')
-        new_data = new_data.set_index('SYMBOL')
-        self.df.update(new_data.where(~new_data.isna()))
-        self.df.reset_index(inplace=True)
+        try:
+            self.df = self.df.set_index('SYMBOL')
+            new_data = new_data.set_index('SYMBOL')
+            self.df.update(new_data.where(~new_data.isna()))
+            self.df.reset_index(inplace=True)
+        except:
+            self.df = new_data
 
         # self.df = new_data
         self.update_table()
@@ -442,7 +468,7 @@ class StockWatchlistApp(QMainWindow):
         self.refresh_all_button.setStyleSheet(self.refresh_all_button.styleSheet().replace("transparent", "#27ae60"))
         self.quick_refresh_button.setStyleSheet(self.quick_refresh_button.styleSheet().replace("transparent", "#f39c12"))
         self.current_refresh_type = None  # Reset the refresh type
-        QMessageBox.information(self, "Data Updated", "Stock data has been successfully updated.")
+        # QMessageBox.information(self, "Data Updated", "Stock data has been successfully updated.")
 
     @pyqtSlot(str)
     def show_error(self, error_message):
