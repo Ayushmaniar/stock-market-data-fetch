@@ -1,10 +1,7 @@
 Usage
 
 ```
-pip install pandas
-pip install openpyxl
-pip install numpy
-pip install PyQt5
+pip install pandas yfinance PyQt5 tqdm openpyxl xlsxwriter
 pip install PyInstaller
 ```
 
