@@ -46,9 +46,10 @@ class DataDownloadThread(QThread):
     finished_signal = pyqtSignal(pd.DataFrame)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, symbols=None, parent=None):
+    def __init__(self, symbols=None, date_to_use = None, parent=None):
         super().__init__(parent)
         self.symbols = symbols
+        self.date_to_use = date_to_use
 
     def run(self):
         try:
@@ -67,8 +68,8 @@ class DataDownloadThread(QThread):
             error_companies = []
 
             # Download data for the current day using yfinance
-            today = datetime.today().strftime('%Y-%m-%d')
-            pandas_today = pd.Timestamp(today)
+            pandas_today = pd.Timestamp(self.date_to_use)
+            
             last_trading_day = (pandas_today - BDay(1)).strftime('%Y-%m-%d')
             five_trading_days_ago = (pandas_today - BDay(5)).strftime('%Y-%m-%d')
 
@@ -84,7 +85,7 @@ class DataDownloadThread(QThread):
             for company_no, company in enumerate(yahoo_finance_symbols):
                 self.status_signal.emit(f"Downloading data for {company}")
                 time.sleep(0.01)
-                fetch_data = yf.download(company, start=one_month_ago, end=pd.to_datetime(today) + pd.Timedelta(days=1), progress=False)
+                fetch_data = yf.download(company, start=one_month_ago, end=pd.to_datetime(self.date_to_use) + pd.Timedelta(days=1), progress=False)
                 try:
                     if fetch_data.reset_index()['Date'].max() > max_date:
                         max_date = fetch_data.reset_index()['Date'].max()
@@ -99,7 +100,7 @@ class DataDownloadThread(QThread):
 
             self.status_signal.emit(f"Download completed. Processing data...")
 
-            if max_date.strftime('%Y-%m-%d') != today:
+            if max_date.strftime('%Y-%m-%d') != self.date_to_use:
                 self.error_signal.emit("No stock data was successfully downloaded. Today might be a holiday.")
                 return
 
@@ -109,7 +110,7 @@ class DataDownloadThread(QThread):
                 if not data.empty:
                     data = data.reset_index()
                     data['SYMBOL'] = symbol
-                    single_row = data.loc[data['Date'] == today]
+                    single_row = data.loc[data['Date'] == self.date_to_use]
                     if not single_row.empty:
                         todays_close = single_row['Close'].values[0]
                         prev_close = data.loc[data['Date'] == last_trading_day, 'Close'].values[0] if not data.loc[data['Date'] == last_trading_day].empty else None
@@ -143,7 +144,7 @@ class DataDownloadThread(QThread):
 
             # If it's a full refresh, save the data to a new Excel file
             if not self.symbols:
-                output_file_name = f'../../yahoo_finance_data/{today}_stock_market_data.xlsx'
+                output_file_name = f'../../yahoo_finance_data/{self.date_to_use}_stock_market_data.xlsx'
                 with pd.ExcelWriter(output_file_name, engine='xlsxwriter') as writer:
                     # Write the DataFrame to the Excel file
                     all_stock_data.to_excel(writer, index=False, sheet_name='Sheet1')
@@ -221,7 +222,6 @@ class StockWatchlistApp(QMainWindow):
         self.init_ui()
         self.df = self.load_data()
         self.init_ui()
-        self.update_refresh_times()
 
         # self.installEventFilter(self)
         
@@ -350,15 +350,6 @@ class StockWatchlistApp(QMainWindow):
             self.update_table()
         except:
             pass
-
-    def update_last_refresh_label(self):
-        folder_path = '../../yahoo_finance_data'
-        files = [f for f in os.listdir(folder_path) if f.endswith("_stock_market_data.xlsx")]
-        if files:
-            latest_file = max(files, key=lambda x: datetime.strptime(x[:10], "%Y-%m-%d"))
-            self.last_refresh_label.setText(f"Last full refresh: {latest_file[:10]}")
-        else:
-            self.last_refresh_label.setText("Last full refresh: Never")
         
     def load_data(self):
         folder_path = "../../yahoo_finance_data"
@@ -463,18 +454,51 @@ class StockWatchlistApp(QMainWindow):
             self.update_table()
 
     def refresh_all_data(self):
-        self.start_data_download()
-        # Update last refresh time after downloading
-        self.update_last_refresh_label()
+        today = datetime.today().strftime('%Y-%m-%d')
+        pandas_today = pd.Timestamp(today)
+
+        # Check if today is a weekend
+        if datetime.today().weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+            last_weekday = (pandas_today - pd.offsets.BDay(1)).strftime("%Y-%m-%d")
+            retry = QMessageBox.question(
+                self, "Weekend download", "Today {} is a Saturday/Sunday, would you like to download data for the last Friday {} instead?".format(today , last_weekday),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if retry == QMessageBox.Yes:
+                date_to_use = last_weekday
+            else:
+                date_to_use = today
+        else:
+            date_to_use = today
+
+        self.start_data_download(date_to_use = date_to_use)
+
 
     def quick_refresh_data(self):
         if not self.watchlist:
             QMessageBox.warning(self, "No Stocks", "No stocks in the watchlist. Please add stocks before refreshing.")
             return
-        self.start_data_download(self.watchlist)
+        today = datetime.today().strftime('%Y-%m-%d')
+        pandas_today = pd.Timestamp(today)
 
-    def start_data_download(self, symbols=None):
-        self.download_thread = DataDownloadThread(symbols)
+        # Check if today is a weekend
+        if datetime.today().weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+            last_weekday = (pandas_today - pd.offsets.BDay(1)).strftime("%Y-%m-%d")
+            retry = QMessageBox.question(
+                self, "Weekend download", "Today {} is a Saturday/Sunday, would you like to download data for the last Friday {} instead?".format(today , last_weekday),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if retry == QMessageBox.Yes:
+                date_to_use = last_weekday
+            else:
+                date_to_use = today
+        else:
+            date_to_use = today
+
+        self.start_data_download(symbols = self.watchlist , date_to_use = date_to_use)
+
+    def start_data_download(self, symbols=None, date_to_use = None):
+        self.download_thread = DataDownloadThread(symbols,date_to_use)
         self.download_thread.progress_signal.connect(self.update_progress)
         self.download_thread.status_signal.connect(self.update_status)
         self.download_thread.finished_signal.connect(self.update_data)
