@@ -214,10 +214,16 @@ class StockWatchlistApp(QMainWindow):
         
         self.sort_column = None
         self.sort_order = Qt.AscendingOrder
+
+        self.last_full_refresh = None
+        self.last_quick_refresh = None
         
         self.init_ui()
         self.df = self.load_data()
         self.init_ui()
+        self.update_refresh_times()
+
+        # self.installEventFilter(self)
         
 
     def ensure_data_folder_exists(self, data_folder):
@@ -229,6 +235,8 @@ class StockWatchlistApp(QMainWindow):
         self.setCentralWidget(central_widget)
         
         layout = QVBoxLayout()
+
+        # Add refresh 
         
         # Title
         title_label = QLabel("Stock Watchlist")
@@ -276,7 +284,7 @@ class StockWatchlistApp(QMainWindow):
         
         # Refresh buttons
         refresh_layout = QHBoxLayout()
-        self.refresh_all_button = QPushButton("REFRESH ALL")
+        self.refresh_all_button = QPushButton("DOWNLOAD ALL")
         self.refresh_all_button.clicked.connect(self.refresh_all_data)
         self.refresh_all_button.setStyleSheet("""
             QPushButton {
@@ -342,6 +350,15 @@ class StockWatchlistApp(QMainWindow):
             self.update_table()
         except:
             pass
+
+    def update_last_refresh_label(self):
+        folder_path = '../../yahoo_finance_data'
+        files = [f for f in os.listdir(folder_path) if f.endswith("_stock_market_data.xlsx")]
+        if files:
+            latest_file = max(files, key=lambda x: datetime.strptime(x[:10], "%Y-%m-%d"))
+            self.last_refresh_label.setText(f"Last full refresh: {latest_file[:10]}")
+        else:
+            self.last_refresh_label.setText("Last full refresh: Never")
         
     def load_data(self):
         folder_path = "../../yahoo_finance_data"
@@ -447,6 +464,8 @@ class StockWatchlistApp(QMainWindow):
 
     def refresh_all_data(self):
         self.start_data_download()
+        # Update last refresh time after downloading
+        self.update_last_refresh_label()
 
     def quick_refresh_data(self):
         if not self.watchlist:
