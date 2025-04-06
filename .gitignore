@@ -4,3 +4,4 @@ dist/*
 test_app.spec
 test_data_download.ipynb
 check_start_date.ipynb
+*.spec
