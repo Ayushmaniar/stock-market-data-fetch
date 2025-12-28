@@ -372,7 +372,22 @@ class DataDownloadThread(QThread):
                         self.error_signal.emit(f"Error saving data: {str(e)}")
                         return
 
-                self.status_signal.emit(f"Data saved to {output_file_name}")
+                # Show comprehensive summary
+                abs_path = os.path.abspath(output_file_name)
+                success_count = len(stock_data)
+                total_count = len(yahoo_finance_symbols)
+                fail_count = len(error_companies)
+                success_rate = (success_count / total_count * 100) if total_count > 0 else 0
+
+                self.status_signal.emit(f"\n{'='*60}")
+                self.status_signal.emit(f"DOWNLOAD COMPLETE!")
+                self.status_signal.emit(f"{'='*60}")
+                self.status_signal.emit(f"Total stocks: {total_count}")
+                self.status_signal.emit(f"Successfully downloaded: {success_count} ({success_rate:.1f}%)")
+                self.status_signal.emit(f"Failed: {fail_count}")
+                self.status_signal.emit(f"\nFile saved to:")
+                self.status_signal.emit(f"{abs_path}")
+                self.status_signal.emit(f"{'='*60}\n")
 
             self.finished_signal.emit(all_stock_data)
 
