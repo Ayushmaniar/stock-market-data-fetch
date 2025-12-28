@@ -279,7 +279,7 @@ class DataDownloadThread(QThread):
                         else:
                             continue
                     
-                    single_row = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == target_date].copy()
+                    single_row = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == target_date].head(1).copy()
                     if not single_row.empty:
                         close_col = 'Close'
                         # Safely access array values with bounds checking
