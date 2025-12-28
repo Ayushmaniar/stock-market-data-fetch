@@ -18,14 +18,11 @@ from tqdm import tqdm  # Import tqdm for progress bars
 import sys
 
 # Set up logging
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[logging.FileHandler("stock_data_debug.log"),
+                    handlers=[logging.FileHandler("stock_data_debug.log"), 
                               logging.StreamHandler()])
 logger = logging.getLogger("StockDataProcessor")
-
-# Suppress yfinance error messages (delisted stocks, etc.)
-logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 warnings.filterwarnings('ignore')
 
@@ -261,38 +258,19 @@ class DataDownloadThread(QThread):
                         else:
                             continue  # Skip this symbol if no close price available
 
-                        # Get previous close (1D ago) - using .iat for guaranteed scalar access
                         prev_close_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == last_trading_day]
-                        if not prev_close_data.empty:
-                            prev_close = float(prev_close_data[close_col].iat[0])
-                        else:
-                            prev_close = None
+                        prev_close = prev_close_data[close_col].values[0] if not prev_close_data.empty and len(prev_close_data[close_col].values) > 0 else None
 
-                        # Get 5 days ago close
                         five_days_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == five_trading_days_ago]
-                        if not five_days_data.empty:
-                            five_days_close = float(five_days_data[close_col].iat[0])
-                        else:
-                            five_days_close = None
+                        five_days_close = five_days_data[close_col].values[0] if not five_days_data.empty and len(five_days_data[close_col].values) > 0 else None
 
-                        # For 1M, find the closest available date near one_month_ago
                         one_month_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == one_month_ago]
-                        if one_month_data.empty:
-                            # If exact date not available, find the closest earlier date
-                            available_dates_df = data[data['Date'].dt.strftime('%Y-%m-%d') <= one_month_ago]
-                            if not available_dates_df.empty:
-                                closest_date = available_dates_df['Date'].max()
-                                one_month_data = data.loc[data['Date'] == closest_date]
-
-                        if not one_month_data.empty:
-                            one_month_close = float(one_month_data[close_col].iat[0])
-                        else:
-                            one_month_close = None
-
+                        one_month_close = one_month_data[close_col].values[0] if not one_month_data.empty and len(one_month_data[close_col].values) > 0 else None
+                        
                         single_row['Previous_Close'] = prev_close
-                        single_row['1D'] = ((todays_close - prev_close) / prev_close * 100) if prev_close is not None else None
-                        single_row['5D'] = ((todays_close - five_days_close) / five_days_close * 100) if five_days_close is not None else None
-                        single_row['1M'] = ((todays_close - one_month_close) / one_month_close * 100) if one_month_close is not None else None
+                        single_row['1D'] = ((todays_close - prev_close) / prev_close * 100) if prev_close else None
+                        single_row['5D'] = ((todays_close - five_days_close) / five_days_close * 100) if five_days_close else None
+                        single_row['1M'] = ((todays_close - one_month_close) / one_month_close * 100) if one_month_close else None
 
                         all_stock_data = pd.concat([all_stock_data, single_row])
 
