@@ -61,6 +61,41 @@ python -m unittest stockwatch.tests.test_ui_components
 python -m unittest stockwatch.tests.test_main_window
 ```
 
+### Automated Daily Downloads (CLI)
+
+Download stock data without opening the GUI - perfect for scheduled tasks:
+
+```bash
+# Download today's data
+python download_daily.py
+
+# Download data for a specific date
+python download_daily.py --date 2025-12-25
+```
+
+**Setting up automated daily downloads:**
+
+**Windows (Task Scheduler):**
+1. Open Task Scheduler
+2. Create Basic Task → Name it "Stock Data Download"
+3. Trigger: Daily at your preferred time (e.g., 6:00 PM after market close)
+4. Action: Start a Program
+   - Program: `python.exe` (or full path: `C:\Python312\python.exe`)
+   - Arguments: `download_daily.py`
+   - Start in: `C:\Users\YourName\Documents\stock-market-data-fetch`
+5. Finish and test the task
+
+**Linux/Mac (cron):**
+```bash
+# Edit crontab
+crontab -e
+
+# Add this line to run daily at 6:00 PM
+0 18 * * * cd /path/to/stock-market-data-fetch && python download_daily.py
+```
+
+**Note:** Downloads take 10-15 minutes for all stocks. Schedule accordingly.
+
 ## Building the Executable
 
 Build a standalone executable (takes 3-5 minutes):
