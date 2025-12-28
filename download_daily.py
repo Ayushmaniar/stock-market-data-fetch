@@ -186,7 +186,8 @@ class ParallelDownloadManager:
 
         # Load stock symbols
         try:
-            csv_path = "EQUITY_L.csv"
+            # TODO: Temporary - using short version for testing. Revert to EQUITY_L.csv later
+            csv_path = "EQUITY_L_short.csv"
             if not os.path.exists(csv_path):
                 print(f"Error: {csv_path} not found!")
                 return False
