@@ -296,9 +296,9 @@ class DataDownloadThread(QThread):
                         one_month_close = one_month_data[close_col].values[0] if not one_month_data.empty and len(one_month_data[close_col].values) > 0 else None
                         
                         single_row['Previous_Close'] = prev_close
-                        single_row['1D'] = ((todays_close - prev_close) / prev_close * 100) if prev_close else None
-                        single_row['5D'] = ((todays_close - five_days_close) / five_days_close * 100) if five_days_close else None
-                        single_row['1M'] = ((todays_close - one_month_close) / one_month_close * 100) if one_month_close else None
+                        single_row['1D'] = ((todays_close - prev_close) / prev_close * 100) if prev_close is not None else None
+                        single_row['5D'] = ((todays_close - five_days_close) / five_days_close * 100) if five_days_close is not None else None
+                        single_row['1M'] = ((todays_close - one_month_close) / one_month_close * 100) if one_month_close is not None else None
 
                         all_stock_data = pd.concat([all_stock_data, single_row])
 
