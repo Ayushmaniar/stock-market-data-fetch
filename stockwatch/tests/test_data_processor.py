@@ -67,11 +67,10 @@ class TestDataProcessor(unittest.TestCase):
         
         # Assert the progress signal was called at least once
         self.mock_progress.emit.assert_called()
-
+        
         # Assert the status signal was called with specific messages
         status_calls = [call[0][0] for call in self.mock_status.emit.call_args_list]
-        # Check for threaded download message
-        self.assertTrue(any("using 5 parallel threads" in call for call in status_calls))
+        self.assertTrue("Downloading data for AAPL.NS" in status_calls)
         self.assertTrue("Data processing completed." in status_calls)
         
         # Assert the finished signal was called with a DataFrame
