@@ -36,7 +36,7 @@ class TestMainWindow(unittest.TestCase):
         self.mock_thread = MagicMock()
         self.mock_thread_class.return_value = self.mock_thread
         
-        # Create test DataFrame
+        # Create test DataFrame (yfinance no longer provides Adj Close for NSE stocks)
         self.test_df = pd.DataFrame({
             'SYMBOL': ['AAPL.NS', 'MSFT.NS', 'GOOGL.NS'],
             'Date': ['2025-04-05', '2025-04-05', '2025-04-05'],
@@ -44,7 +44,6 @@ class TestMainWindow(unittest.TestCase):
             'High': [155.0, 255.0, 2050.0],
             'Low': [148.0, 248.0, 1950.0],
             'Close': [152.0, 252.0, 2020.0],
-            'Adj Close': [152.0, 252.0, 2020.0],
             'Volume': [1000000, 500000, 200000],
             'Previous_Close': [151.0, 251.0, 2010.0],
             '1D': [0.66, 0.40, 0.50],
@@ -69,9 +68,9 @@ class TestMainWindow(unittest.TestCase):
         """Test that the UI is initialized correctly."""
         # Check that the window title is set correctly
         self.assertEqual(self.window.windowTitle(), "Stock Watchlist")
-        
+
         # Check that the table is created with the correct number of columns
-        self.assertEqual(self.window.table.columnCount(), 13)
+        self.assertEqual(self.window.table.columnCount(), 12)
         
         # Check that the refresh buttons are created
         self.assertTrue(hasattr(self.window, 'refresh_all_button'))

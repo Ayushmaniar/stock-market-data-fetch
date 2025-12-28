@@ -33,17 +33,16 @@ class TestDataProcessor(unittest.TestCase):
         })
         mock_read_csv.return_value = mock_csv_data
         
-        # Create mock stock data
+        # Create mock stock data (yfinance returns date as index, not as column)
+        # And no longer provides Adj Close for NSE stocks
         mock_stock_data = pd.DataFrame({
-            'Date': [datetime.today()],
             'Open': [150.0],
             'High': [155.0],
             'Low': [148.0],
             'Close': [152.0],
-            'Adj Close': [152.0],
             'Volume': [1000000]
         })
-        mock_stock_data.index = [datetime.today()]
+        mock_stock_data.index = pd.DatetimeIndex([datetime.today()], name='Date')
         mock_download.return_value = mock_stock_data
         
         # Create the thread with mocked signals
