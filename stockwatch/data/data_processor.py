@@ -18,11 +18,14 @@ from tqdm import tqdm  # Import tqdm for progress bars
 import sys
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[logging.FileHandler("stock_data_debug.log"), 
+                    handlers=[logging.FileHandler("stock_data_debug.log"),
                               logging.StreamHandler()])
 logger = logging.getLogger("StockDataProcessor")
+
+# Suppress yfinance error messages (delisted stocks, etc.)
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 warnings.filterwarnings('ignore')
 

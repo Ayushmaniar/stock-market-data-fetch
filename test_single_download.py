@@ -9,6 +9,10 @@ import time
 from datetime import datetime
 from pandas.tseries.offsets import BDay
 import traceback
+import logging
+
+# Suppress yfinance error messages
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 def download_with_retry(symbol, start_date, end_date, max_retries=3, retry_delay=2):
     """Download data with retry mechanism to handle transient errors"""
