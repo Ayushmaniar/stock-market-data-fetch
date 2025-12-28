@@ -261,17 +261,17 @@ class DataDownloadThread(QThread):
                         else:
                             continue  # Skip this symbol if no close price available
 
-                        # Get previous close (1D ago)
+                        # Get previous close (1D ago) - using .iat for guaranteed scalar access
                         prev_close_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == last_trading_day]
                         if not prev_close_data.empty:
-                            prev_close = float(prev_close_data.iloc[0][close_col])
+                            prev_close = float(prev_close_data[close_col].iat[0])
                         else:
                             prev_close = None
 
                         # Get 5 days ago close
                         five_days_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == five_trading_days_ago]
                         if not five_days_data.empty:
-                            five_days_close = float(five_days_data.iloc[0][close_col])
+                            five_days_close = float(five_days_data[close_col].iat[0])
                         else:
                             five_days_close = None
 
@@ -285,7 +285,7 @@ class DataDownloadThread(QThread):
                                 one_month_data = data.loc[data['Date'] == closest_date]
 
                         if not one_month_data.empty:
-                            one_month_close = float(one_month_data.iloc[0][close_col])
+                            one_month_close = float(one_month_data[close_col].iat[0])
                         else:
                             one_month_close = None
 
