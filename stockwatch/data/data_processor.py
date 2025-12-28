@@ -18,12 +18,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm  # Import tqdm for progress bars
 import sys
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, 
+# Set up logging - only log to file, not console (to reduce noise)
+logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[logging.FileHandler("stock_data_debug.log"), 
-                              logging.StreamHandler()])
+                    handlers=[logging.FileHandler("stock_data_debug.log")])
 logger = logging.getLogger("StockDataProcessor")
+
+# Suppress yfinance's noisy warnings
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 warnings.filterwarnings('ignore')
 
