@@ -262,10 +262,10 @@ class DataDownloadThread(QThread):
                             continue  # Skip this symbol if no close price available
 
                         prev_close_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == last_trading_day]
-                        prev_close = float(prev_close_data[close_col].values[0]) if not prev_close_data.empty and len(prev_close_data[close_col].values) > 0 else None
+                        prev_close = float(prev_close_data[close_col].iloc[0]) if not prev_close_data.empty else None
 
                         five_days_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == five_trading_days_ago]
-                        five_days_close = float(five_days_data[close_col].values[0]) if not five_days_data.empty and len(five_days_data[close_col].values) > 0 else None
+                        five_days_close = float(five_days_data[close_col].iloc[0]) if not five_days_data.empty else None
 
                         # For 1M, find the closest available date near one_month_ago
                         one_month_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == one_month_ago]
@@ -276,7 +276,7 @@ class DataDownloadThread(QThread):
                                 closest_date = available_dates_df['Date'].max()
                                 one_month_data = data.loc[data['Date'] == closest_date]
 
-                        one_month_close = float(one_month_data[close_col].values[0]) if not one_month_data.empty and len(one_month_data[close_col].values) > 0 else None
+                        one_month_close = float(one_month_data[close_col].iloc[0]) if not one_month_data.empty else None
 
                         single_row['Previous_Close'] = prev_close
                         single_row['1D'] = ((todays_close - prev_close) / prev_close * 100) if prev_close is not None else None
