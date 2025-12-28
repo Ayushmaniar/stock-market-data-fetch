@@ -173,16 +173,16 @@ class DataDownloadThread(QThread):
 
             total_symbols = len(yahoo_finance_symbols)
 
-            # Use threaded downloads for much faster performance (10x+ speedup)
-            self.status_signal.emit(f"Downloading data for {total_symbols} symbols using 10 parallel threads...")
-            logger.info(f"Starting threaded download with 10 workers for {total_symbols} symbols")
+            # Use threaded downloads for much faster performance (5-6x speedup)
+            self.status_signal.emit(f"Downloading data for {total_symbols} symbols using 5 parallel threads...")
+            logger.info(f"Starting threaded download with 5 workers for {total_symbols} symbols")
 
             completed_count = 0
             start_date = one_month_ago
             end_date = pd.to_datetime(self.date_to_use) + pd.Timedelta(days=1)
 
-            # Use ThreadPoolExecutor for parallel downloads
-            with ThreadPoolExecutor(max_workers=10) as executor:
+            # Use ThreadPoolExecutor for parallel downloads (5 workers to avoid rate limiting)
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 # Submit all download tasks
                 future_to_symbol = {
                     executor.submit(self.download_single_stock_wrapper, symbol, start_date, end_date): symbol
