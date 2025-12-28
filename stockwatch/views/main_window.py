@@ -419,6 +419,11 @@ class StockWatchlistApp(QMainWindow):
         except:
             self.df = new_data
 
+        # Update autocomplete list with new data
+        if self.df is not None and 'SYMBOL' in self.df.columns:
+            self.all_symbols = self.df['SYMBOL'].tolist()
+            self.stock_input.completer().model().setStringList(self.all_symbols)
+
         self.update_table()
         self.progress_bar.setVisible(False)
         self.status_text.setVisible(False)
