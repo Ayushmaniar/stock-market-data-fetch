@@ -5,3 +5,8 @@ test_app.spec
 test_data_download.ipynb
 check_start_date.ipynb
 *.spec
+*.log
+*.egg-info
+*.egg
+__pycache__/
+*.pyc

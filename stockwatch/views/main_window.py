@@ -1,177 +1,22 @@
-import sys
-import os
-import pandas as pd
-import yfinance as yf
-from datetime import datetime
-from tqdm import tqdm
-from urllib.parse import quote_plus
-import time
-from pandas.tseries.offsets import BDay
-import warnings
-from PyQt5.QtCore import QThread, pyqtSignal
+"""Main application window for the StockWatch application."""
 
 import sys
 import os
 import pandas as pd
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QLabel, 
-                             QFrame, QCompleter, QTextEdit, QProgressBar)
-from PyQt5.QtCore import Qt, QSortFilterProxyModel, pyqtSlot
-from PyQt5.QtGui import QColor, QPalette, QFont, QDesktopServices, QCursor
-from PyQt5.QtCore import QUrl
 from datetime import datetime
 
-warnings.filterwarnings('ignore')
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+                             QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, 
+                             QLabel, QTextEdit, QProgressBar, QCompleter)
+from PyQt5.QtCore import Qt, pyqtSlot, QUrl
+from PyQt5.QtGui import QColor
 
-class ClickableLabel(QLabel):
-    def __init__(self, text, url, parent=None):
-        super().__init__(text, parent)
-        self.url = url
-        self.setStyleSheet("color: blue; text-decoration: underline;")
-        self.setCursor(QCursor(Qt.PointingHandCursor))
-
-        # Set a larger font size
-        font = self.font()
-        font.setPointSize(9)  # You can adjust this value as needed
-        # font.setBold(True)     # Optional: make the font bold
-        self.setFont(font)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            QDesktopServices.openUrl(QUrl(self.url))
-
-class DataDownloadThread(QThread):
-    progress_signal = pyqtSignal(int)
-    status_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal(pd.DataFrame)
-    error_signal = pyqtSignal(str)
-
-    def __init__(self, symbols=None, date_to_use = None, parent=None):
-        super().__init__(parent)
-        self.symbols = symbols
-        self.date_to_use = date_to_use
-
-    def run(self):
-        try:
-            # Read list of stocks from the CSV file
-            stocks_df = pd.read_csv("../../EQUITY_L.csv")
-            stocks_df['YahooEquiv'] = stocks_df['SYMBOL'] + '.NS'
-
-            stocks_df = stocks_df
-
-            # If symbols are provided (for quick refresh), use only those
-            if self.symbols:
-                yahoo_finance_symbols = [symbol for symbol in self.symbols]
-            else:
-                yahoo_finance_symbols = list(stocks_df['YahooEquiv'])
-
-            error_companies = []
-
-            # Download data for the current day using yfinance
-            pandas_today = pd.Timestamp(self.date_to_use)
-            
-            last_trading_day = (pandas_today - BDay(1)).strftime('%Y-%m-%d')
-            five_trading_days_ago = (pandas_today - BDay(5)).strftime('%Y-%m-%d')
-
-            one_month_ago = pandas_today - pd.DateOffset(months=1)
-            if one_month_ago.weekday() > 4:
-                one_month_ago = one_month_ago + pd.DateOffset(days=(7 - one_month_ago.weekday()))
-            one_month_ago = one_month_ago.strftime('%Y-%m-%d')
-
-            stock_data = {}
-            max_date = pd.Timestamp('2008-01-01')
-
-            total_symbols = len(yahoo_finance_symbols)
-            for company_no, company in enumerate(yahoo_finance_symbols):
-                self.status_signal.emit(f"Downloading data for {company}")
-                time.sleep(0.01)
-                fetch_data = yf.download(company, start=one_month_ago, end=pd.to_datetime(self.date_to_use) + pd.Timedelta(days=1), progress=False)
-                try:
-                    if fetch_data.reset_index()['Date'].max() > max_date:
-                        max_date = fetch_data.reset_index()['Date'].max()
-                except:
-                    pass
-
-                if not fetch_data.empty:
-                    stock_data[company] = fetch_data
-
-                progress = int((company_no + 1) / total_symbols * 100)
-                self.progress_signal.emit(progress)
-
-            self.status_signal.emit(f"Download completed. Processing data...")
-
-            if max_date.strftime('%Y-%m-%d') != self.date_to_use:
-                self.error_signal.emit("No stock data was successfully downloaded. Today might be a holiday.")
-                return
-
-            all_stock_data = pd.DataFrame()
-
-            for symbol, data in stock_data.items():
-                if not data.empty:
-                    data = data.reset_index()
-                    data['SYMBOL'] = symbol
-                    single_row = data.loc[data['Date'] == self.date_to_use]
-                    if not single_row.empty:
-                        todays_close = single_row['Close'].values[0]
-                        prev_close = data.loc[data['Date'] == last_trading_day, 'Close'].values[0] if not data.loc[data['Date'] == last_trading_day].empty else None
-                        five_days_close = data.loc[data['Date'] == five_trading_days_ago, 'Close'].values[0] if not data.loc[data['Date'] == five_trading_days_ago].empty else None
-                        one_month_close = data.loc[data['Date'] == one_month_ago, 'Close'].values[0] if not data.loc[data['Date'] == one_month_ago].empty else None
-                        
-                        single_row['Previous_Close'] = prev_close
-                        single_row['1D'] = ((todays_close - prev_close) / prev_close * 100) if prev_close else None
-                        single_row['5D'] = ((todays_close - five_days_close) / five_days_close * 100) if five_days_close else None
-                        single_row['1M'] = ((todays_close - one_month_close) / one_month_close * 100) if one_month_close else None
-
-                        all_stock_data = pd.concat([all_stock_data, single_row])
-
-            all_stock_data.reset_index(inplace=True, drop=True)
-            all_stock_data['Date'] = all_stock_data['Date'].astype(str)
-            all_stock_data.sort_values(by='1D', ascending=False, inplace=True)
-            all_stock_data = all_stock_data.round(2)
-
-            # Move 'SYMBOL' column to the first position
-            cols = list(all_stock_data.columns)
-            cols.insert(0, cols.pop(cols.index('SYMBOL')))
-            all_stock_data = all_stock_data[cols]
-
-            all_stock_data.reset_index(inplace=True, drop=True)
-
-            # Create a new column containing the Google search URL for each symbol
-            google_search_urls = 'https://www.google.com/search?q=' + all_stock_data['SYMBOL'].str.replace('.NS','').apply(quote_plus) + '+share+price'
-            google_search_urls = google_search_urls.sort_index()
-
-            self.status_signal.emit("Data processing completed.")
-
-            # If it's a full refresh, save the data to a new Excel file
-            if not self.symbols:
-                output_file_name = f'../../yahoo_finance_data/{self.date_to_use}_stock_market_data.xlsx'
-                with pd.ExcelWriter(output_file_name, engine='xlsxwriter') as writer:
-                    # Write the DataFrame to the Excel file
-                    all_stock_data.to_excel(writer, index=False, sheet_name='Sheet1')
-
-                    # Get the workbook and worksheet objects
-                    workbook = writer.book
-                    worksheet = writer.sheets['Sheet1']
-
-                    for i, url in enumerate(google_search_urls):
-                        cell = f'A{i+2}'  # Adjust the row index to match the data (indexing starts from 2 because of header)
-                        worksheet.write_url(cell, url, string=all_stock_data.loc[i, 'SYMBOL'])
-
-                        red_format = workbook.add_format({'bg_color': '#FFC7CE'})
-
-                            # Apply the format to the 'Close' column
-                        worksheet.conditional_format('F2:F' + str(len(all_stock_data) + 1), {'type': 'no_blanks', 'format': red_format})
-
-                self.status_signal.emit(f"Data saved to {output_file_name}")
-    
-
-            self.finished_signal.emit(all_stock_data)
-
-        except Exception as e:
-            self.error_signal.emit(str(e))
-
+from stockwatch.views.ui_components import ClickableLabel
+from stockwatch.data.data_processor import DataDownloadThread
 
 class StockWatchlistApp(QMainWindow):
+    """Main application window for the StockWatch application."""
+    
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Stock Watchlist")
@@ -218,26 +63,30 @@ class StockWatchlistApp(QMainWindow):
 
         self.last_full_refresh = None
         self.last_quick_refresh = None
-        
+        self.current_refresh_type = None  # Initialize to prevent AttributeError
+        self.df = None  # Initialize dataframe to None before UI setup
+
         self.init_ui()
         self.df = self.load_data()
-        self.init_ui()
 
-        # self.installEventFilter(self)
-        
+        # Update UI components after data is loaded
+        if self.df is not None:
+            self.all_symbols = self.df['SYMBOL'].tolist() if 'SYMBOL' in self.df.columns else []
+            self.stock_input.completer().model().setStringList(self.all_symbols)
+            self.update_table()
 
     def ensure_data_folder_exists(self, data_folder):
+        """Ensure the data folder exists, creating it if necessary."""
         if not os.path.exists(data_folder):
             os.makedirs(data_folder)
         
     def init_ui(self):
+        """Initialize the user interface."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
         layout = QVBoxLayout()
 
-        # Add refresh 
-        
         # Title
         title_label = QLabel("Stock Watchlist")
         title_label.setAlignment(Qt.AlignCenter)
@@ -253,10 +102,12 @@ class StockWatchlistApp(QMainWindow):
         self.stock_input.returnPressed.connect(self.add_stock_wrapper)
         
         # Load all stock symbols for auto-suggestion
-        try:
-            all_symbols_list = self.df['SYMBOL'].tolist()
-
-        except:
+        if self.df is not None:
+            try:
+                all_symbols_list = self.df['SYMBOL'].tolist()
+            except (KeyError, AttributeError) as e:
+                all_symbols_list = []
+        else:
             all_symbols_list = []
         self.all_symbols = all_symbols_list
 
@@ -345,25 +196,29 @@ class StockWatchlistApp(QMainWindow):
         layout.addLayout(save_layout)
         
         central_widget.setLayout(layout)
-        
-        try:
-            self.update_table()
-        except:
-            pass
+
+        # Only update table if data is loaded
+        if self.df is not None:
+            try:
+                self.update_table()
+            except (KeyError, AttributeError, ValueError) as e:
+                # Silently handle table update errors during initialization
+                pass
         
     def load_data(self):
-        folder_path = "../../yahoo_finance_data"
+        """Load stock data from the most recent file."""
+        folder_path = "yahoo_finance_data"
         self.ensure_data_folder_exists(folder_path)
         files = [f for f in os.listdir(folder_path) if f.endswith("_stock_market_data.xlsx")]
         if not files:
             QMessageBox.warning(self, "No Data Found", "No stock data found. Please press the REFRESH ALL button to download data.")
             self.refresh_all_data()
             return None
-        files = [f for f in os.listdir(folder_path) if f.endswith("_stock_market_data.xlsx")]
         latest_file = max(files, key=lambda x: datetime.strptime(x[:10], "%Y-%m-%d"))
         return pd.read_excel(os.path.join(folder_path, latest_file))
         
     def update_table(self):
+        """Update the table with current watchlist data."""
         self.table.setRowCount(0)
         if self.df is not None:
             watchlist_df = self.df[self.df['SYMBOL'].isin(self.watchlist)]
@@ -375,6 +230,7 @@ class StockWatchlistApp(QMainWindow):
                 self.add_row_to_table(row)
         
     def add_row_to_table(self, row):
+        """Add a row to the table with stock data."""
         row_position = self.table.rowCount()
         self.table.insertRow(row_position)
         # Create clickable label for stock symbol
@@ -382,7 +238,6 @@ class StockWatchlistApp(QMainWindow):
         url = f"https://www.google.com/search?q={symbol.replace('.NS', '')}+share+price"
         clickable_label = ClickableLabel(symbol, url)
         self.table.setCellWidget(row_position, 0, clickable_label)
-
 
         for i, value in enumerate(row):
             item = QTableWidgetItem(str(value))
@@ -410,10 +265,12 @@ class StockWatchlistApp(QMainWindow):
         self.table.setCellWidget(row_position, 12, delete_button)
         
     def add_stock_wrapper(self):
+        """Wrapper for add_stock that clears the input field."""
         self.add_stock()
         self.stock_input.clear()
 
     def add_stock(self):
+        """Add a stock to the watchlist."""
         symbol = self.stock_input.text().upper()
         if symbol and symbol not in self.watchlist:
             if self.df is not None and symbol in self.df['SYMBOL'].values:
@@ -427,23 +284,27 @@ class StockWatchlistApp(QMainWindow):
             QMessageBox.information(self, "Duplicate Stock", "This stock is already in your watchlist.")
         
     def delete_stock(self, symbol):
+        """Remove a stock from the watchlist."""
         self.watchlist.remove(symbol)
         self.update_table()
         
     def save_watchlist(self):
-        with open("../../watchlist.txt", "w") as f:
+        """Save the current watchlist to a file."""
+        with open("watchlist.txt", "w") as f:
             for symbol in self.watchlist:
                 f.write(f"{symbol}\n")
         QMessageBox.information(self, "Watchlist Saved", "Your watchlist has been saved successfully.")
         
     def load_watchlist(self):
+        """Load the watchlist from a file."""
         try:
-            with open("../../watchlist.txt", "r") as f:
+            with open("watchlist.txt", "r") as f:
                 self.watchlist = [line.strip() for line in f.readlines()]
         except FileNotFoundError:
             pass
 
     def on_header_clicked(self, logical_index):
+        """Handle header clicks for sorting."""
         header_item = self.table.horizontalHeaderItem(logical_index)
         if header_item:
             self.sort_column = header_item.text()
@@ -454,6 +315,7 @@ class StockWatchlistApp(QMainWindow):
             self.update_table()
 
     def refresh_all_data(self):
+        """Refresh all stock data."""
         today = datetime.today().strftime('%Y-%m-%d')
         pandas_today = pd.Timestamp(today)
 
@@ -461,7 +323,7 @@ class StockWatchlistApp(QMainWindow):
         if datetime.today().weekday() >= 5:  # 5 = Saturday, 6 = Sunday
             last_weekday = (pandas_today - pd.offsets.BDay(1)).strftime("%Y-%m-%d")
             retry = QMessageBox.question(
-                self, "Weekend download", "Today {} is a Saturday/Sunday, would you like to download data for the last Friday {} instead?".format(today , last_weekday),
+                self, "Weekend download", f"Today {today} is a Saturday/Sunday, would you like to download data for the last Friday {last_weekday} instead?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No
             )
             if retry == QMessageBox.Yes:
@@ -471,13 +333,14 @@ class StockWatchlistApp(QMainWindow):
         else:
             date_to_use = today
 
-        self.start_data_download(date_to_use = date_to_use)
-
+        self.start_data_download(date_to_use=date_to_use)
 
     def quick_refresh_data(self):
+        """Refresh only watchlist stock data."""
         if not self.watchlist:
             QMessageBox.warning(self, "No Stocks", "No stocks in the watchlist. Please add stocks before refreshing.")
             return
+        
         today = datetime.today().strftime('%Y-%m-%d')
         pandas_today = pd.Timestamp(today)
 
@@ -485,7 +348,7 @@ class StockWatchlistApp(QMainWindow):
         if datetime.today().weekday() >= 5:  # 5 = Saturday, 6 = Sunday
             last_weekday = (pandas_today - pd.offsets.BDay(1)).strftime("%Y-%m-%d")
             retry = QMessageBox.question(
-                self, "Weekend download", "Today {} is a Saturday/Sunday, would you like to download data for the last Friday {} instead?".format(today , last_weekday),
+                self, "Weekend download", f"Today {today} is a Saturday/Sunday, would you like to download data for the last Friday {last_weekday} instead?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No
             )
             if retry == QMessageBox.Yes:
@@ -495,16 +358,16 @@ class StockWatchlistApp(QMainWindow):
         else:
             date_to_use = today
 
-        self.start_data_download(symbols = self.watchlist , date_to_use = date_to_use)
+        self.start_data_download(symbols=self.watchlist, date_to_use=date_to_use)
 
-    def start_data_download(self, symbols=None, date_to_use = None):
-        self.download_thread = DataDownloadThread(symbols,date_to_use)
+    def start_data_download(self, symbols=None, date_to_use=None):
+        """Start the data download thread."""
+        self.download_thread = DataDownloadThread(symbols, date_to_use)
         self.download_thread.progress_signal.connect(self.update_progress)
         self.download_thread.status_signal.connect(self.update_status)
         self.download_thread.finished_signal.connect(self.update_data)
         self.download_thread.error_signal.connect(self.show_error)
         
-
         self.progress_bar.setVisible(True)
         self.status_text.setVisible(True)
         self.refresh_all_button.setEnabled(False)
@@ -517,6 +380,7 @@ class StockWatchlistApp(QMainWindow):
 
     @pyqtSlot(int)
     def update_progress(self, value):
+        """Update the progress bar."""
         self.progress_bar.setValue(value)
         if self.current_refresh_type == 'quick':
             self.quick_refresh_button.setStyleSheet(f"""
@@ -541,10 +405,12 @@ class StockWatchlistApp(QMainWindow):
 
     @pyqtSlot(str)
     def update_status(self, status):
+        """Update the status text."""
         self.status_text.append(status)
 
     @pyqtSlot(pd.DataFrame)
     def update_data(self, new_data):
+        """Update the data after download is complete."""
         try:
             self.df = self.df.set_index('SYMBOL')
             new_data = new_data.set_index('SYMBOL')
@@ -553,7 +419,6 @@ class StockWatchlistApp(QMainWindow):
         except:
             self.df = new_data
 
-        # self.df = new_data
         self.update_table()
         self.progress_bar.setVisible(False)
         self.status_text.setVisible(False)
@@ -562,10 +427,10 @@ class StockWatchlistApp(QMainWindow):
         self.refresh_all_button.setStyleSheet(self.refresh_all_button.styleSheet().replace("transparent", "#27ae60"))
         self.quick_refresh_button.setStyleSheet(self.quick_refresh_button.styleSheet().replace("transparent", "#f39c12"))
         self.current_refresh_type = None  # Reset the refresh type
-        # QMessageBox.information(self, "Data Updated", "Stock data has been successfully updated.")
 
     @pyqtSlot(str)
     def show_error(self, error_message):
+        """Show an error message."""
         QMessageBox.critical(self, "Error", f"An error occurred: {error_message}")
         self.progress_bar.setVisible(False)
         self.status_text.setVisible(False)
@@ -575,8 +440,26 @@ class StockWatchlistApp(QMainWindow):
         self.quick_refresh_button.setStyleSheet(self.quick_refresh_button.styleSheet().replace("transparent", "#f39c12"))
         self.current_refresh_type = None  # Reset the refresh type
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = StockWatchlistApp()
-    window.show()
-    sys.exit(app.exec_())
+    def closeEvent(self, event):
+        """Handle application close event - cleanup threads before exit."""
+        # Check if download thread is running
+        if hasattr(self, 'download_thread') and self.download_thread.isRunning():
+            reply = QMessageBox.question(
+                self,
+                'Download in Progress',
+                'Data download is still in progress. Do you want to stop it and exit?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                # Terminate the thread and exit
+                self.download_thread.terminate()
+                self.download_thread.wait(2000)  # Wait up to 2 seconds for cleanup
+                event.accept()
+            else:
+                # Don't close the application
+                event.ignore()
+        else:
+            # No download running, safe to close
+            event.accept()
