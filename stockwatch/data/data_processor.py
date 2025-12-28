@@ -60,7 +60,14 @@ class DataDownloadThread(QThread):
                 
                 if isinstance(data.columns, pd.MultiIndex):
                     data.columns = [f"{col[0]}" for col in data.columns]
-                
+
+                # Ensure columns are in the expected order (yfinance may return them in any order)
+                if not data.empty:
+                    expected_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    available_cols = [col for col in expected_cols if col in data.columns]
+                    if available_cols:
+                        data = data[available_cols]
+
                 if data.empty:
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)

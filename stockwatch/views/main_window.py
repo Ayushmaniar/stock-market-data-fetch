@@ -125,8 +125,8 @@ class StockWatchlistApp(QMainWindow):
         
         # Table for displaying stocks
         self.table = QTableWidget()
-        self.table.setColumnCount(13)
-        headers = ["SYMBOL", "Date", "Open", "High", "Low", "Close", "Adj Close", "Volume", "Previous_Close", "1D", "5D", "1M", "Action"]
+        self.table.setColumnCount(12)
+        headers = ["SYMBOL", "Date", "Open", "High", "Low", "Close", "Volume", "Previous_Close", "1D", "5D", "1M", "Action"]
         self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
@@ -241,7 +241,7 @@ class StockWatchlistApp(QMainWindow):
 
         for i, value in enumerate(row):
             item = QTableWidgetItem(str(value))
-            if i in [9, 10, 11]:  # 1D, 5D, 1M columns
+            if i in [8, 9, 10]:  # 1D, 5D, 1M columns
                 value_float = float(value) if value and value != 'nan' else 0
                 if value_float > 0:
                     item.setForeground(QColor('green'))
@@ -262,7 +262,7 @@ class StockWatchlistApp(QMainWindow):
             border-radius: 10px;
             font-size: 12px;
         """)
-        self.table.setCellWidget(row_position, 12, delete_button)
+        self.table.setCellWidget(row_position, 11, delete_button)
         
     def add_stock_wrapper(self):
         """Wrapper for add_stock that clears the input field."""

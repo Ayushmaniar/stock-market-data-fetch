@@ -37,6 +37,14 @@ def download_with_retry(symbol, start_date, end_date, max_retries=3, retry_delay
                 print("Converting MultiIndex columns to single level")
                 data.columns = [f"{col[0]}" for col in data.columns]
 
+            # Ensure columns are in the expected order (yfinance may return them in any order)
+            if not data.empty:
+                expected_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                available_cols = [col for col in expected_cols if col in data.columns]
+                if available_cols:
+                    data = data[available_cols]
+                    print(f"Reordered columns to: {data.columns.tolist()}")
+
             if data.empty:
                 print(f"WARNING: Empty dataframe received for {symbol}")
                 if attempt < max_retries - 1:
