@@ -296,13 +296,19 @@ class DataDownloadThread(QThread):
 
                         one_month_data = data.loc[data['Date'].dt.strftime('%Y-%m-%d') == one_month_ago]
                         one_month_close = one_month_data[close_col].values[0] if not one_month_data.empty and len(one_month_data[close_col].values) > 0 else None
-                        
-                        single_row['Previous_Close'] = prev_close
-                        single_row['1D'] = ((todays_close - prev_close) / prev_close * 100) if prev_close is not None else None
-                        single_row['5D'] = ((todays_close - five_days_close) / five_days_close * 100) if five_days_close is not None else None
-                        single_row['1M'] = ((todays_close - one_month_close) / one_month_close * 100) if one_month_close is not None else None
 
-                        all_stock_data = pd.concat([all_stock_data, single_row])
+                        # Calculate returns
+                        calc_1d = ((todays_close - prev_close) / prev_close * 100) if prev_close is not None else None
+                        calc_5d = ((todays_close - five_days_close) / five_days_close * 100) if five_days_close is not None else None
+                        calc_1m = ((todays_close - one_month_close) / one_month_close * 100) if one_month_close is not None else None
+
+                        # Use .assign() to safely add columns (avoids SettingWithCopy issues)
+                        single_row = single_row.assign(
+                            Previous_Close=prev_close,
+                            **{'1D': calc_1d, '5D': calc_5d, '1M': calc_1m}
+                        )
+
+                        all_stock_data = pd.concat([all_stock_data, single_row], ignore_index=True)
 
             if all_stock_data.empty:
                 error_msg = "No valid stock data was found for the requested date."
