@@ -22,9 +22,9 @@ class TestDataProcessor(unittest.TestCase):
         self.mock_finished = MagicMock()
         self.mock_error = MagicMock()
         
-    @patch('stockwatch.data.data_processor.yf.download')
+    @patch('stockwatch.data.data_processor.yf.Ticker')
     @patch('stockwatch.data.data_processor.pd.read_csv')
-    def test_download_with_symbols(self, mock_read_csv, mock_download):
+    def test_download_with_symbols(self, mock_read_csv, mock_ticker_class):
         """Test downloading data for specific symbols."""
         # Create mock CSV data
         mock_csv_data = pd.DataFrame({
@@ -32,9 +32,8 @@ class TestDataProcessor(unittest.TestCase):
             'YahooEquiv': ['AAPL.NS', 'MSFT.NS']
         })
         mock_read_csv.return_value = mock_csv_data
-        
-        # Create mock stock data (yfinance returns date as index, not as column)
-        # And no longer provides Adj Close for NSE stocks
+
+        # Create mock stock data (yf.Ticker().history() returns date as index)
         mock_stock_data = pd.DataFrame({
             'Open': [150.0],
             'High': [155.0],
@@ -42,8 +41,15 @@ class TestDataProcessor(unittest.TestCase):
             'Close': [152.0],
             'Volume': [1000000]
         })
-        mock_stock_data.index = pd.DatetimeIndex([datetime.today()], name='Date')
-        mock_download.return_value = mock_stock_data
+        # history() returns a tz-aware index (Asia/Kolkata for NSE stocks)
+        mock_stock_data.index = pd.DatetimeIndex(
+            [pd.Timestamp(self.date_to_use)], name='Date'
+        ).tz_localize('Asia/Kolkata')
+
+        # Mock the Ticker class and its history method
+        mock_ticker_instance = MagicMock()
+        mock_ticker_instance.history.return_value = mock_stock_data
+        mock_ticker_class.return_value = mock_ticker_instance
         
         # Create the thread with mocked signals
         thread = DataDownloadThread(symbols=['AAPL.NS'], date_to_use=self.date_to_use)
@@ -70,12 +76,18 @@ class TestDataProcessor(unittest.TestCase):
         
         # Assert the status signal was called with specific messages
         status_calls = [call[0][0] for call in self.mock_status.emit.call_args_list]
-        self.assertTrue("Downloading data for AAPL.NS" in status_calls)
+        # Check for multi-threaded download status message
+        download_started = any("Downloading data for" in msg and "threads" in msg for msg in status_calls)
+        self.assertTrue(download_started, f"Expected multi-threaded download status, got: {status_calls}")
         self.assertTrue("Data processing completed." in status_calls)
         
         # Assert the finished signal was called with a DataFrame
         self.mock_finished.emit.assert_called_once()
-        
+
+        # Date column should be plain YYYY-MM-DD, with no timezone suffix
+        result_df = self.mock_finished.emit.call_args[0][0]
+        self.assertEqual(result_df['Date'].iloc[0], self.date_to_use)
+
         # Assert the error signal was not called
         self.mock_error.emit.assert_not_called()
 

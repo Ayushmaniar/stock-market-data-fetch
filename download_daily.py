@@ -118,7 +118,7 @@ def download_stock_data(date_str=None):
     thread.error_signal.connect(on_error_wrapper)
 
     # Run the download (synchronously)
-    print("Starting download... This may take 10-15 minutes for all stocks.\n")
+    print("Starting download... This may take 3-5 minutes for all stocks (multi-threaded).\n")
     thread.run()
 
     # Return success status
@@ -135,7 +135,7 @@ Examples:
   python download_daily.py                    # Download today's data
   python download_daily.py --date 2025-12-25  # Download for specific date
 
-Note: This script downloads data for ALL NSE stocks (~1500+) and takes 10-15 minutes.
+Note: This script downloads data for ALL NSE stocks (~1500+) and takes ~3-5 minutes with multi-threaded download.
         """
     )
     parser.add_argument(

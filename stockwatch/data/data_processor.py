@@ -15,6 +15,7 @@ import traceback
 from requests.exceptions import RequestException
 # requests is already included via yfinance, no need to import separately
 from tqdm import tqdm  # Import tqdm for progress bars
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 
 # Set up logging
@@ -42,37 +43,46 @@ class DataDownloadThread(QThread):
     finished_signal = pyqtSignal(pd.DataFrame)
     error_signal = pyqtSignal(str)
 
+    # Number of parallel download threads (5 is conservative to avoid rate limits)
+    MAX_DOWNLOAD_THREADS = 5
+
     def __init__(self, symbols=None, date_to_use=None, parent=None):
         super().__init__(parent)
         self.symbols = symbols
         self.date_to_use = date_to_use
         
     def download_with_retry(self, symbol, start_date, end_date, max_retries=3, retry_delay=2):
-        """Download data with retry mechanism to handle transient errors"""
+        """Download data with retry mechanism to handle transient errors.
+
+        Uses yf.Ticker().history() instead of yf.download() for thread-safety.
+        yf.download() uses shared global state that causes race conditions
+        when called from multiple threads.
+        """
         for attempt in range(max_retries):
             try:
-                data = yf.download(
-                    symbol, 
-                    start=start_date, 
-                    end=end_date, 
-                    progress=False
-                )
-                
-                if isinstance(data.columns, pd.MultiIndex):
-                    data.columns = [f"{col[0]}" for col in data.columns]
+                # Use Ticker.history() instead of yf.download() for thread-safety
+                # Each Ticker object is independent, avoiding shared state issues
+                ticker = yf.Ticker(symbol)
+                data = ticker.history(start=start_date, end=end_date)
 
-                # Ensure columns are in the expected order (yfinance may return them in any order)
+                # history() returns columns: Open, High, Low, Close, Volume, Dividends, Stock Splits
+                # Keep only the columns we need
                 if not data.empty:
                     expected_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
                     available_cols = [col for col in expected_cols if col in data.columns]
                     if available_cols:
                         data = data[available_cols]
 
+                    # history() returns a tz-aware (Asia/Kolkata) index; drop the tz so
+                    # dates stay plain YYYY-MM-DD downstream (Excel/UI Date column)
+                    if data.index.tz is not None:
+                        data.index = data.index.tz_localize(None)
+
                 if data.empty:
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                         continue
-                
+
                 return data
                 
             except json.JSONDecodeError as e:
@@ -108,6 +118,26 @@ class DataDownloadThread(QThread):
                     raise
                 
         return pd.DataFrame()  # Return empty dataframe if all retries failed
+
+    def _download_single_stock(self, args):
+        """Download a single stock - helper for thread pool.
+
+        Args:
+            args: Tuple of (symbol, start_date, end_date)
+
+        Returns:
+            Tuple of (symbol, data, error_message)
+        """
+        symbol, start_date, end_date = args
+        try:
+            data = self.download_with_retry(symbol, start_date, end_date)
+            if not data.empty:
+                return (symbol, data, None)
+            return (symbol, None, "Empty data")
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Thread download error for {symbol}: {error_msg}")
+            return (symbol, None, error_msg)
 
     def run(self):
         try:
@@ -146,58 +176,78 @@ class DataDownloadThread(QThread):
             max_date = pd.Timestamp('2008-01-01')
 
             total_symbols = len(yahoo_finance_symbols)
-            
-            # Use tqdm for progress tracking in console (only if not running as executable)
-            self.status_signal.emit(f"Downloading data for {total_symbols} symbols...")
-            # Disable tqdm in packaged executable to avoid stdout errors
-            if getattr(sys, 'frozen', False):
-                # Running as compiled executable - no tqdm
-                iterator = enumerate(yahoo_finance_symbols)
-            else:
-                # Running in development - use tqdm
-                iterator = enumerate(tqdm(yahoo_finance_symbols, desc="Downloading stock data", unit="symbol"))
 
-            for company_no, company in iterator:
-                self.status_signal.emit(f"Downloading data for {company}")
-                time.sleep(0.01)
-                try:
-                    fetch_data = self.download_with_retry(
-                        company, 
-                        start_date=one_month_ago, 
-                        end_date=pd.to_datetime(self.date_to_use) + pd.Timedelta(days=1)
-                    )
-                    
+            # Parallel download using ThreadPoolExecutor
+            self.status_signal.emit(f"Downloading data for {total_symbols} symbols using {self.MAX_DOWNLOAD_THREADS} threads...")
+            logger.info(f"Starting parallel download with {self.MAX_DOWNLOAD_THREADS} threads for {total_symbols} symbols")
+
+            # Prepare arguments for thread pool
+            end_date_str = (pd.to_datetime(self.date_to_use) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+            download_args = [(symbol, one_month_ago, end_date_str) for symbol in yahoo_finance_symbols]
+
+            # Track progress
+            completed_count = 0
+
+            # Use ThreadPoolExecutor for parallel downloads
+            with ThreadPoolExecutor(max_workers=self.MAX_DOWNLOAD_THREADS) as executor:
+                # Submit all download tasks
+                future_to_symbol = {
+                    executor.submit(self._download_single_stock, args): args[0]
+                    for args in download_args
+                }
+
+                # Create progress bar for console (only if not running as executable)
+                if getattr(sys, 'frozen', False):
+                    pbar = None
+                else:
+                    pbar = tqdm(total=total_symbols, desc="Downloading stock data", unit="symbol")
+
+                # Process results as they complete
+                for future in as_completed(future_to_symbol):
+                    symbol = future_to_symbol[future]
+                    completed_count += 1
+
                     try:
-                        if not fetch_data.empty and 'Date' in fetch_data.reset_index().columns:
-                            if fetch_data.reset_index()['Date'].max() > max_date:
-                                max_date = fetch_data.reset_index()['Date'].max()
+                        symbol, fetch_data, error = future.result()
+
+                        if fetch_data is not None:
+                            # Update max_date if needed (for tracking purposes only)
+                            try:
+                                if 'Date' in fetch_data.reset_index().columns:
+                                    data_max_date = fetch_data.reset_index()['Date'].max()
+                                    if data_max_date > max_date:
+                                        max_date = data_max_date
+                            except Exception as e:
+                                # Non-critical error, just log at debug level
+                                logger.debug(f"Error getting max date for {symbol}: {str(e)}")
+
+                            stock_data[symbol] = fetch_data
+                        else:
+                            error_companies.append(symbol)
+                            if error:
+                                logger.warning(f"No data for {symbol}: {error}")
+
                     except Exception as e:
-                        logger.error(f"Error getting max date for {company}: {str(e)}")
+                        error_companies.append(symbol)
+                        error_msg = f"Warning: Error downloading {symbol}: {str(e)}"
+                        logger.error(error_msg)
+                        logger.error(traceback.format_exc())
 
-                    if not fetch_data.empty:
-                        stock_data[company] = fetch_data
-                    else:
-                        error_companies.append(company)
-                        error_msg = f"Warning: No data retrieved for {company}"
-                        self.status_signal.emit(error_msg)
-                        
-                except json.JSONDecodeError as e:
-                    error_companies.append(company)
-                    error_msg = f"Warning: JSON decode error for {company}: {str(e)}"
-                    logger.error(error_msg)
-                    logger.error(traceback.format_exc())
-                    self.status_signal.emit(error_msg)
-                    
-                except Exception as e:
-                    error_companies.append(company)
-                    error_msg = f"Warning: Error downloading {company}: {str(e)}"
-                    logger.error(error_msg)
-                    logger.error(traceback.format_exc())
-                    self.status_signal.emit(error_msg)
+                    # Update progress for GUI
+                    progress = int(completed_count / total_symbols * 100)
+                    self.progress_signal.emit(progress)
 
-                # Update progress for GUI
-                progress = int((company_no + 1) / total_symbols * 100)
-                self.progress_signal.emit(progress)
+                    # Update console progress bar
+                    if pbar:
+                        pbar.update(1)
+
+                    # Emit status every 50 stocks to avoid overwhelming the UI
+                    if completed_count % 50 == 0:
+                        self.status_signal.emit(f"Downloaded {completed_count}/{total_symbols} symbols...")
+
+                # Close progress bar
+                if pbar:
+                    pbar.close()
 
             self.status_signal.emit(f"Download completed. Processing data...")
             
