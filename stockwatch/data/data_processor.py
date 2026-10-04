@@ -2,6 +2,7 @@
 
 import pandas as pd
 import yfinance as yf
+from yfinance import exceptions as yf_exceptions
 import time
 from datetime import datetime
 from urllib.parse import quote_plus
@@ -23,7 +24,15 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[logging.FileHandler("stock_data_debug.log"), 
                               logging.StreamHandler()])
+# Console only shows warnings and above; per-attempt retry details go to the log file only
+logging.getLogger().handlers[1].setLevel(logging.WARNING)
 logger = logging.getLogger("StockDataProcessor")
+
+# Make yfinance raise typed exceptions (YFRateLimitError, YFTzMissingError, ...) instead of
+# printing them and returning an empty DataFrame, so we can handle each case properly.
+# We log failures ourselves, so silence yfinance's own logger.
+yf.config.debug.hide_exceptions = False
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 warnings.filterwarnings('ignore')
 
@@ -43,22 +52,40 @@ class DataDownloadThread(QThread):
     finished_signal = pyqtSignal(pd.DataFrame)
     error_signal = pyqtSignal(str)
 
-    # Number of parallel download threads (5 is conservative to avoid rate limits)
-    MAX_DOWNLOAD_THREADS = 5
+    # Number of parallel download threads (kept low to avoid Yahoo rate limits)
+    MAX_DOWNLOAD_THREADS = 3
+
+    # Rate-limit handling: all threads pause together, with exponential backoff
+    RATE_LIMIT_MAX_RETRIES = 5
+    RATE_LIMIT_BASE_DELAY = 3  # seconds; doubles each retry (3, 6, 12, 24, 48)
 
     def __init__(self, symbols=None, date_to_use=None, parent=None):
         super().__init__(parent)
         self.symbols = symbols
         self.date_to_use = date_to_use
-        
+        self._rate_limit_until = 0.0  # time.time() before which no thread should send requests
+
+    def _wait_for_rate_limit(self):
+        """Block while a rate-limit cooldown is active (shared by all download threads)."""
+        wait = self._rate_limit_until - time.time()
+        if wait > 0:
+            time.sleep(wait)
+
     def download_with_retry(self, symbol, start_date, end_date, max_retries=3, retry_delay=2):
         """Download data with retry mechanism to handle transient errors.
 
         Uses yf.Ticker().history() instead of yf.download() for thread-safety.
         yf.download() uses shared global state that causes race conditions
         when called from multiple threads.
+
+        - Rate limited (YFRateLimitError): all threads pause and retry with exponential backoff.
+        - Delisted / no data (YFTzMissingError etc.): returns an empty DataFrame without retrying.
+        - Other errors: retried up to max_retries times.
         """
-        for attempt in range(max_retries):
+        attempt = 0
+        rate_limit_retries = 0
+        while attempt < max_retries:
+            self._wait_for_rate_limit()
             try:
                 # Use Ticker.history() instead of yf.download() for thread-safety
                 # Each Ticker object is independent, avoiding shared state issues
@@ -79,44 +106,58 @@ class DataDownloadThread(QThread):
                         data.index = data.index.tz_localize(None)
 
                 if data.empty:
-                    if attempt < max_retries - 1:
+                    attempt += 1
+                    if attempt < max_retries:
                         time.sleep(retry_delay)
                         continue
 
                 return data
-                
+
+            except yf_exceptions.YFRateLimitError:
+                rate_limit_retries += 1
+                if rate_limit_retries > self.RATE_LIMIT_MAX_RETRIES:
+                    logger.warning(f"Rate limited: giving up on {symbol} after {self.RATE_LIMIT_MAX_RETRIES} backoff retries")
+                    raise
+                delay = self.RATE_LIMIT_BASE_DELAY * 2 ** (rate_limit_retries - 1)
+                logger.info(f"Rate limited on {symbol}, pausing all threads for {delay}s (retry {rate_limit_retries}/{self.RATE_LIMIT_MAX_RETRIES})")
+                # Pause every thread, not just this one, so the cooldown actually helps
+                self._rate_limit_until = max(self._rate_limit_until, time.time() + delay)
+                # Rate-limit retries don't consume the normal retry budget
+
+            except (yf_exceptions.YFTzMissingError,
+                    yf_exceptions.YFPricesMissingError,
+                    yf_exceptions.YFTickerMissingError):
+                # Delisted or no data for this period - retrying won't help
+                logger.info(f"No data available for {symbol} (possibly delisted)")
+                return pd.DataFrame()
+
             except json.JSONDecodeError as e:
-                error_msg = f"JSONDecodeError for {symbol}: {str(e)}"
-                logger.error(error_msg)
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                
-                if attempt < max_retries - 1:
+                attempt += 1
+                logger.info(f"JSONDecodeError for {symbol}: {str(e)}")
+                if attempt < max_retries:
                     time.sleep(retry_delay)
                 else:
-                    logger.error(f"Failed to download {symbol} after {max_retries} attempts")
+                    logger.warning(f"Failed to download {symbol} after {max_retries} attempts")
                     raise
-                    
+
             except RequestException as e:
-                error_msg = f"Network error for {symbol}: {str(e)}"
-                logger.error(error_msg)
-                
-                if attempt < max_retries - 1:
+                attempt += 1
+                logger.info(f"Network error for {symbol}: {str(e)}")
+                if attempt < max_retries:
                     time.sleep(retry_delay)
                 else:
-                    logger.error(f"Failed to download {symbol} after {max_retries} attempts")
+                    logger.warning(f"Failed to download {symbol} after {max_retries} attempts")
                     raise
-                    
+
             except Exception as e:
-                error_msg = f"Unknown error for {symbol}: {str(e)}"
-                logger.error(error_msg)
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                
-                if attempt < max_retries - 1:
+                attempt += 1
+                logger.info(f"Unknown error for {symbol}: {str(e)}\n{traceback.format_exc()}")
+                if attempt < max_retries:
                     time.sleep(retry_delay)
                 else:
-                    logger.error(f"Failed to download {symbol} after {max_retries} attempts")
+                    logger.warning(f"Failed to download {symbol} after {max_retries} attempts")
                     raise
-                
+
         return pd.DataFrame()  # Return empty dataframe if all retries failed
 
     def _download_single_stock(self, args):
@@ -136,7 +177,7 @@ class DataDownloadThread(QThread):
             return (symbol, None, "Empty data")
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Thread download error for {symbol}: {error_msg}")
+            logger.info(f"Thread download error for {symbol}: {error_msg}")
             return (symbol, None, error_msg)
 
     def run(self):
@@ -225,7 +266,7 @@ class DataDownloadThread(QThread):
                         else:
                             error_companies.append(symbol)
                             if error:
-                                logger.warning(f"No data for {symbol}: {error}")
+                                logger.info(f"No data for {symbol}: {error}")
 
                     except Exception as e:
                         error_companies.append(symbol)

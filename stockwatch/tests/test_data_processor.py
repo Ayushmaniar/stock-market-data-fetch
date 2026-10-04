@@ -5,6 +5,7 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
+from yfinance import exceptions as yf_exceptions
 
 from stockwatch.tests.test_utils import project_root
 from stockwatch.data.data_processor import DataDownloadThread
@@ -90,6 +91,52 @@ class TestDataProcessor(unittest.TestCase):
 
         # Assert the error signal was not called
         self.mock_error.emit.assert_not_called()
+
+    @patch('stockwatch.data.data_processor.time.sleep')
+    @patch('stockwatch.data.data_processor.yf.Ticker')
+    def test_rate_limit_backs_off_and_recovers(self, mock_ticker_class, mock_sleep):
+        """A rate-limited request pauses all threads, then succeeds on retry."""
+        good = pd.DataFrame({'Open': [1.0], 'High': [2.0], 'Low': [1.0], 'Close': [2.0], 'Volume': [10]},
+                            index=pd.DatetimeIndex([pd.Timestamp('2026-01-02')], name='Date'))
+        ticker = MagicMock()
+        ticker.history.side_effect = [yf_exceptions.YFRateLimitError(), yf_exceptions.YFRateLimitError(), good]
+        mock_ticker_class.return_value = ticker
+
+        thread = DataDownloadThread()
+        result = thread.download_with_retry('ABC.NS', '2026-01-01', '2026-01-03')
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(ticker.history.call_count, 3)
+        # Backoff doubles: 3s then 6s cooldown was set on the shared pause timestamp
+        self.assertGreater(thread._rate_limit_until, 0)
+
+    @patch('stockwatch.data.data_processor.time.sleep')
+    @patch('stockwatch.data.data_processor.yf.Ticker')
+    def test_rate_limit_gives_up_after_max_retries(self, mock_ticker_class, mock_sleep):
+        """Persistent rate limiting eventually raises instead of looping forever."""
+        ticker = MagicMock()
+        ticker.history.side_effect = yf_exceptions.YFRateLimitError()
+        mock_ticker_class.return_value = ticker
+
+        thread = DataDownloadThread()
+        with self.assertRaises(yf_exceptions.YFRateLimitError):
+            thread.download_with_retry('ABC.NS', '2026-01-01', '2026-01-03')
+        self.assertEqual(ticker.history.call_count, DataDownloadThread.RATE_LIMIT_MAX_RETRIES + 1)
+
+    @patch('stockwatch.data.data_processor.time.sleep')
+    @patch('stockwatch.data.data_processor.yf.Ticker')
+    def test_delisted_stock_is_not_retried(self, mock_ticker_class, mock_sleep):
+        """Delisted symbols return empty immediately without retries or sleeping."""
+        ticker = MagicMock()
+        ticker.history.side_effect = yf_exceptions.YFTzMissingError('DEAD.NS')
+        mock_ticker_class.return_value = ticker
+
+        thread = DataDownloadThread()
+        result = thread.download_with_retry('DEAD.NS', '2026-01-01', '2026-01-03')
+
+        self.assertTrue(result.empty)
+        self.assertEqual(ticker.history.call_count, 1)
+        mock_sleep.assert_not_called()
 
     def test_data_folder_creation(self):
         """Test that the data folder is created correctly."""
